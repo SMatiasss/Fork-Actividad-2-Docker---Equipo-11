@@ -1,0 +1,81 @@
+# =====================================================================
+# docker-compose.yml - Actividad 2 (Docker)
+# Levanta 3 contenedores conectados entre sí:
+#   1) db       -> base de datos MySQL
+#   2) backend  -> API en FastAPI
+#   3) frontend -> página estática servida con Nginx
+# Se levanta todo con un solo comando:  docker compose up --build
+# =====================================================================
+
+services:  # Lista de contenedores ("servicios") que componen la aplicación
+
+  # -------------------------------------------------------------------
+  # 1) BASE DE DATOS (MySQL)
+  # -------------------------------------------------------------------
+  db:  # Nombre del servicio. Es también el "hostname" dentro de la red (el backend se conecta a "db")
+    image: mysql:8.0  # Imagen oficial ya armada, descargada de Docker Hub (no hay Dockerfile propio)
+    container_name: tp_mysql  # Nombre fijo del contenedor (lo usamos en "docker exec -it tp_mysql ...")
+    restart: unless-stopped  # Si se cae o se reinicia la PC, vuelve a arrancar solo (salvo que lo frenemos a mano)
+    environment:  # Variables de entorno que la imagen de MySQL lee al crearse
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}  # Password del usuario root. ${...} se lee del archivo .env
+      MYSQL_DATABASE: ${MYSQL_DATABASE}  # Base de datos que se crea automáticamente al iniciar
+      MYSQL_USER: ${MYSQL_USER}  # Usuario común (no root) que se crea automáticamente
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}  # Password de ese usuario común
+    volumes:
+      - mysql_data:/var/lib/mysql  # Volumen persistente: guarda los datos de MySQL fuera del contenedor, así no se pierden si se borra
+      - ./db-init:/docker-entrypoint-initdb.d  # Carpeta con init.sql; MySQL ejecuta esos .sql SOLO la primera vez que se crea la base
+    ports:
+      - "3306:3306"  # Formato "puerto_de_tu_PC:puerto_del_contenedor". Opcional: permite conectarse a MySQL desde afuera de Docker
+    networks:
+      - tp-network  # Conecta este contenedor a nuestra red personalizada
+    healthcheck:  # Docker "pregunta" periódicamente si el servicio está realmente listo
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]  # Comando que se ejecuta; si responde OK, MySQL está sano
+      interval: 5s  # Cada cuánto repite la verificación
+      timeout: 5s  # Cuánto espera la respuesta antes de darla por fallida
+      retries: 10  # Cuántos fallos seguidos toleramos antes de marcarlo como "unhealthy"
+
+  # -------------------------------------------------------------------
+  # 2) BACKEND (FastAPI)
+  # -------------------------------------------------------------------
+  backend:
+    build: ./backend  # En vez de una imagen ya armada, construye la imagen usando el Dockerfile de la carpeta ./backend
+    container_name: tp_backend  # Nombre fijo del contenedor
+    restart: unless-stopped  # Se reinicia solo si se cae
+    environment:  # Variables que main.py lee con os.getenv(...) para conectarse a MySQL
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "8000:8000"  # Expone la API hacia tu PC: el navegador la consulta en http://localhost:8000
+    depends_on:  # Define el orden de arranque
+      db:
+        condition: service_healthy  # No arranca el backend hasta que el healthcheck de MySQL dé OK (no alcanza con que "haya empezado")
+    networks:
+      - tp-network
+
+  # -------------------------------------------------------------------
+  # 3) FRONTEND (Nginx sirviendo HTML/CSS/JS estático)
+  # -------------------------------------------------------------------
+  frontend:
+    build: ./frontend  # Construye la imagen con el Dockerfile de ./frontend (nginx:alpine + nuestros archivos)
+    container_name: tp_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"  # Nginx escucha en el 80 dentro del contenedor; desde tu PC se entra por http://localhost:3000
+    depends_on:
+      - backend  # Solo controla el ORDEN de lanzamiento (backend primero); no espera a que esté "listo"
+    networks:
+      - tp-network
+
+# ---------------------------------------------------------------------
+# RED PERSONALIZADA
+# ---------------------------------------------------------------------
+networks:
+  tp-network:  # Nombre de la red
+    driver: bridge  # Tipo bridge: red privada virtual donde los contenedores se ven por el nombre de su servicio (db, backend, frontend)
+
+# ---------------------------------------------------------------------
+# VOLÚMENES
+# ---------------------------------------------------------------------
+volumes:
+  mysql_data:  # Declaración del volumen usado por MySQL. Docker lo administra y persiste aunque se borren los contenedores
