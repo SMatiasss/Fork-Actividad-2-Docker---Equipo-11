@@ -15,7 +15,7 @@ services:  # Lista de contenedores ("servicios") que componen la aplicación
   db:  # Nombre del servicio. Es también el "hostname" dentro de la red (el backend se conecta a "db")
     image: mysql:8.0  # Imagen oficial ya armada, descargada de Docker Hub (no hay Dockerfile propio)
     container_name: tp_mysql  # Nombre fijo del contenedor (lo usamos en "docker exec -it tp_mysql ...")
-    restart: unless-stopped  # Si se cae o se reinicia la PC, vuelve a arrancar solo (salvo que lo frenemos a mano)
+    restart: unless-stopped  # Si se cae o se reinicia la PC, vuelve a arrancar solo (salvo que lo frenemos a mano) docker stop tp_mysql
     environment:  # Variables de entorno que la imagen de MySQL lee al crearse
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}  # Password del usuario root. ${...} se lee del archivo .env
       MYSQL_DATABASE: ${MYSQL_DATABASE}  # Base de datos que se crea automáticamente al iniciar
