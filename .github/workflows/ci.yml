@@ -1,0 +1,95 @@
+# =====================================================================
+# CI - Actividad GitHub Actions
+# Corre la suite de pytest del backend FastAPI en cada Pull Request
+# hacia main. Funciona como "quality gate": si falla, la branch
+# protection rule bloquea el merge.
+# =====================================================================
+name: CI
+
+# TRIGGER: solo se dispara cuando se abre/actualiza un PR contra main.
+# workflow_dispatch permite lanzarlo a mano desde la pestaña Actions
+# (útil para la primera corrida, antes de tener un PR).
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # El nombre del job ("test") es el que se elige luego en
+  # Settings > Branches > Require status checks to pass.
+  test:
+    runs-on: ubuntu-latest   # runner hospedado por GitHub
+
+    # SERVICE CONTAINER: equivalente al servicio "db" del docker-compose.
+    # GitHub lo levanta antes de los steps y lo apaga al terminar el job.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_test
+          MYSQL_DATABASE: testdb
+          MYSQL_USER: test
+          MYSQL_PASSWORD: test
+        ports: ["3306:3306"]
+        # Mismo concepto que el healthcheck del compose: los steps
+        # no arrancan hasta que MySQL responde.
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -proot_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    # Reemplaza al archivo .env (que no se sube al repo).
+    # main.py las lee con os.getenv(...). Son valores de prueba, no secretos.
+    env:
+      MYSQL_USER: test
+      MYSQL_PASSWORD: test
+      MYSQL_DATABASE: testdb
+
+    steps:
+      # 1) Descarga el código del repo en el runner
+      - uses: actions/checkout@v4
+
+      # 2) main.py tiene el host "db" escrito a fuego (nombre del servicio
+      #    en docker-compose). En el runner MySQL está en 127.0.0.1,
+      #    así que le damos ese alias al nombre "db".
+      - name: Alias del host "db"
+        run: echo "127.0.0.1 db" | sudo tee -a /etc/hosts
+
+      # 3) Replica lo que hace ./db-init montado en
+      #    /docker-entrypoint-initdb.d: crea la tabla usuarios y sus datos.
+      - name: Inicializar base de datos
+        run: |
+          for f in actividad2/db-init/*.sql; do
+            mysql -h 127.0.0.1 -u root -proot_test testdb < "$f"
+          done
+
+      # 4) Python 3.11 (misma versión que el Dockerfile) con caché de pip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: actividad2/backend/requirements.txt
+
+      # 5) Dependencias del backend + herramientas de testing.
+      #    httpx: lo necesita TestClient de FastAPI.
+      #    cryptography: MySQL 8 usa caching_sha2_password y PyMySQL lo pide.
+      - name: Instalar dependencias
+        working-directory: actividad2/backend
+        run: pip install -r requirements.txt pytest pytest-cov pytest-html httpx cryptography
+
+      # 6) Ejecuta la suite y genera reportes HTML (tests + cobertura)
+      - name: Correr tests
+        working-directory: actividad2/backend
+        run: pytest --cov=. --cov-report=html --html=report.html --self-contained-html
+
+      # 7) Publica los reportes como artifact. if: always() los sube
+      #    incluso si los tests fallan (así se ve el reporte del PR roto).
+      - name: Publicar reporte
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-tests
+          path: |
+            actividad2/backend/report.html
+            actividad2/backend/htmlcov/
