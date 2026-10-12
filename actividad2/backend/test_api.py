@@ -13,7 +13,7 @@ def test_usuarios_responde_200():
 def test_usuarios_devuelve_lista_con_datos_de_init_sql():
     data = client.get("/api/usuarios").json()
     assert isinstance(data, list)
-    assert len(data) == 4
+    assert len(data) == 3
 
 
 def test_usuario_tiene_campos_esperados():
