@@ -57,7 +57,7 @@ jobs:
 
       - name: Instalar dependencias
         working-directory: actividad2/backend
-        run: pip install -r requirements.txt pytest pytest-cov pytest-html httpx cryptography
+        run: pip install -r requirements.txt pytest pytest-cov pytest-html httpx
 
       - name: Correr tests
         working-directory: actividad2/backend
