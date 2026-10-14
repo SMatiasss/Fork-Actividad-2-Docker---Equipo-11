@@ -1,40 +1,50 @@
 name: CI
 
+# Se dispara con un PR contra main, o a mano desde la pestaña Actions
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 jobs:
+  # El nombre "test" es el check que exige la branch protection
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # runner de GitHub, máquina limpia en cada corrida
 
+    # Contenedor MySQL: equivale al servicio "db" del docker-compose
     services:
       mysql:
         image: mysql:8.0
         env:
+          # Le dicen a MySQL qué base y usuario crear
           MYSQL_ROOT_PASSWORD: root_test
           MYSQL_DATABASE: testdb
           MYSQL_USER: test
           MYSQL_PASSWORD: test
         ports: ["3306:3306"]
+        # Healthcheck: los steps esperan a que MySQL responda
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -proot_test"
           --health-interval=5s
           --health-timeout=5s
           --health-retries=10
 
+    # Reemplaza al .env: son los datos con los que main.py se conecta
+    # (deben coincidir con los de MySQL). Son de prueba, no secretos
     env:
       MYSQL_USER: test
       MYSQL_PASSWORD: test
       MYSQL_DATABASE: testdb
 
     steps:
+      # 1) Descarga el código del repo en el runner
       - uses: actions/checkout@v4
 
+      # 2) main.py busca el host "db"; lo apuntamos a esta misma máquina
       - name: Alias del host "db"
         run: echo "127.0.0.1 db" | sudo tee -a /etc/hosts
 
+      # 3) Espera a que MySQL acepte conexiones
       - name: Esperar a MySQL
         run: |
           for i in $(seq 1 30); do
@@ -43,26 +53,32 @@ jobs:
           done
           exit 1
 
+      # 4) Crea la tabla usuarios y sus 3 filas ejecutando los .sql
       - name: Inicializar base de datos
         run: |
           for f in actividad2/db-init/*.sql; do
             mysql -h 127.0.0.1 -u root -proot_test testdb < "$f"
           done
 
+      # 5) Python 3.11 con caché de pip
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: actividad2/backend/requirements.txt
 
+      # 6) Instala dependencias + herramientas de testing
       - name: Instalar dependencias
         working-directory: actividad2/backend
         run: pip install -r requirements.txt pytest pytest-cov pytest-html httpx
 
+      # 7) Corre los tests y genera los reportes HTML
+      #    Si un test falla, el step falla y el check queda en rojo
       - name: Correr tests
         working-directory: actividad2/backend
         run: pytest --cov=. --cov-report=html --html=report.html --self-contained-html
 
+      # 8) Sube el reporte como artifact, incluso si los tests fallan
       - name: Publicar reporte
         if: always()
         uses: actions/upload-artifact@v4
